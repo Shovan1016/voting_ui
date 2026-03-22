@@ -13,8 +13,9 @@ export function useMyPolls() {
   return useQuery<Poll[]>({
     queryKey: ["myPolls"],
     queryFn: async () => {
-      const { data } = await api.get<Poll[]>("/polls/myPolls");
-      return data?.pools
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data } = await api.get<any>("/polls/myPolls");
+      return data?.pools as Poll[]
         ;
     },
   });

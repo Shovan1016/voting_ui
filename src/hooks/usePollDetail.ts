@@ -10,6 +10,9 @@ export interface PollOption {
   updatedAt: string;
 }
 
+/** Vote totals keyed by "option_<id>", e.g. { "option_1": 10, "option_2": 5 } */
+export type PollTotals = Record<string, number>;
+
 export interface PollDetail {
   id: number;
   question: string;
@@ -22,12 +25,20 @@ export interface PollDetail {
   options: PollOption[];
 }
 
+export interface PollDetailResponse {
+  poll: PollDetail;
+  totals: PollTotals;
+}
+
 export function usePollDetail(id: number | null) {
-  return useQuery<PollDetail>({
+  return useQuery<PollDetailResponse>({
     queryKey: ["pollDetail", id],
     queryFn: async () => {
       const { data } = await api.get(`/polls/getPoll/${id}`);
-      return data?.pool;
+      return {
+        poll: data?.pool as PollDetail,
+        totals: (data?.totals ?? {}) as PollTotals,
+      };
     },
     enabled: id !== null,
   });

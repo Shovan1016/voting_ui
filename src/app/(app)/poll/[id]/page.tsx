@@ -2,7 +2,8 @@
 
 import { useParams, useSearchParams } from "next/navigation";
 import { usePollSocket } from "@/hooks/usePollSocket";
-import { useState, useMemo } from "react";
+import type { PollUpdatePayload } from "@/hooks/usePollSocket";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft,
@@ -13,30 +14,81 @@ import {
   BarChart3,
   Share2,
   Loader2,
+  AlertCircle,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { usePollDetail } from "@/hooks/usePollDetail";
+import type { PollTotals } from "@/hooks/usePollDetail";
+import { useVote } from "@/hooks/useVote";
+import { useMyVote } from "@/hooks/useMyVote";
 
 export default function PollPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   const router = useRouter();
   const pollId = params?.id ? Number(params.id) : null;
+  const pollIdStr = params?.id ? String(params.id) : null;
   const initialTab = searchParams.get("tab") === "results" ? "results" : "vote";
 
-  const { data: poll, isLoading, isError } = usePollDetail(pollId);
+  const { data, isLoading, isError } = usePollDetail(pollId);
+  const poll = data?.poll;
 
-  // Socket.IO: join poll room on mount, leave + disconnect on unmount
-  const pollIdStr = params?.id ? String(params.id) : null;
-  usePollSocket(pollIdStr);
+  // Real vote totals state — seeded from API, updated live via socket
+  const [totals, setTotals] = useState<PollTotals>({});
+  useEffect(() => {
+    if (data?.totals) setTotals(data.totals);
+  }, [data?.totals]);
+
+  const [closedOverride, setClosedOverride] = useState(false);
+
+  // Check if the current user already voted on this poll
+  const { data: myVote } = useMyVote(pollId);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
-  const [activeTab, setActiveTab] = useState<"vote" | "results">(initialTab);
   const [hasVoted, setHasVoted] = useState(false);
+  // Sync prior vote state once the myVote query resolves
+  useEffect(() => {
+    if (myVote?.voted && myVote.optionId !== null) {
+      setHasVoted(true);
+      setSelectedOption(myVote.optionId);
+    }
+  }, [myVote]);
+
+  const [activeTab, setActiveTab] = useState<"vote" | "results">(initialTab);
   const [copied, setCopied] = useState(false);
 
-  const isClosed = poll
-    ? poll.closed || new Date(poll.closedAt) < new Date()
-    : false;
+  // Socket.IO — join poll room, listen for live updates and poll-closed
+  const handlePollUpdate = useCallback(
+    (update: PollUpdatePayload) => {
+      // Convert options array [{id, votes}] → PollTotals map { option_5: 1, ... }
+      const newTotals: PollTotals = {};
+      for (const opt of update.options) {
+        newTotals[`option_${opt.id}`] = opt.votes;
+      }
+      setTotals(newTotals);
+    },
+    []
+  );
+
+  const handlePollClosed = useCallback(() => {
+    setClosedOverride(true);
+  }, []);
+
+  usePollSocket(pollIdStr, {
+    onPollUpdate: handlePollUpdate,
+    onPollClosed: handlePollClosed,
+  });
+
+  // Vote mutation
+  const {
+    mutate: submitVote,
+    isPending: isVoting,
+    isError: voteError,
+    error: voteErrorData,
+  } = useVote();
+
+  const isClosed =
+    closedOverride ||
+    (poll ? poll.closed || new Date(poll.closedAt) < new Date() : false);
 
   const timeLeft = () => {
     if (!poll) return "";
@@ -52,17 +104,16 @@ export default function PollPage() {
     return `${mins}m left`;
   };
 
-  // Mock vote data for results visualization
-  const mockResults = useMemo(() => {
+  // Derive sorted results from real totals
+  const results = useMemo(() => {
     if (!poll) return [];
-    const total = poll.options.length;
-    return poll.options.map((opt, i) => {
-      const votes = Math.floor(Math.random() * 80) + 10 + i * 5;
-      return { ...opt, votes };
-    });
-  }, [poll]);
+    return poll.options.map((opt) => ({
+      ...opt,
+      votes: totals[`option_${opt.id}`] ?? 0,
+    }));
+  }, [poll, totals]);
 
-  const totalVotes = mockResults.reduce((sum, r) => sum + r.votes, 0);
+  const totalVotes = results.reduce((sum, r) => sum + r.votes, 0);
 
   const COLORS = [
     "from-purple-500 to-purple-600",
@@ -94,10 +145,16 @@ export default function PollPage() {
   };
 
   const handleVote = () => {
-    if (selectedOption === null) return;
-    // TODO: wire to vote API
-    setHasVoted(true);
-    setActiveTab("results");
+    if (selectedOption === null || !pollId) return;
+    submitVote(
+      { pollId, optionId: selectedOption },
+      {
+        onSuccess: () => {
+          setHasVoted(true);
+          setActiveTab("results");
+        },
+      }
+    );
   };
 
   // Loading
@@ -123,6 +180,9 @@ export default function PollPage() {
       </div>
     );
   }
+
+  // Sort results by vote count descending for the results panel
+  const sortedResults = [...results].sort((a, b) => b.votes - a.votes);
 
   return (
     <motion.div
@@ -174,9 +234,8 @@ export default function PollPage() {
           <div className="flex items-center gap-1.5">
             <Clock className="h-3.5 w-3.5 text-zinc-600" />
             <span
-              className={`text-xs font-medium ${
-                isClosed ? "text-red-400" : "text-emerald-400"
-              }`}
+              className={`text-xs font-medium ${isClosed ? "text-red-400" : "text-emerald-400"
+                }`}
             >
               {timeLeft()}
             </span>
@@ -188,22 +247,20 @@ export default function PollPage() {
       <div className="flex gap-1 p-1 bg-zinc-900/60 border border-zinc-800/50 rounded-xl mb-6 w-fit">
         <button
           onClick={() => setActiveTab("vote")}
-          className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-            activeTab === "vote"
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === "vote"
               ? "bg-purple-600 text-white shadow-lg shadow-purple-500/20"
               : "text-zinc-400 hover:text-white"
-          }`}
+            }`}
         >
           <Vote className="h-3.5 w-3.5" />
           Vote
         </button>
         <button
           onClick={() => setActiveTab("results")}
-          className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-            activeTab === "results"
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === "results"
               ? "bg-purple-600 text-white shadow-lg shadow-purple-500/20"
               : "text-zinc-400 hover:text-white"
-          }`}
+            }`}
         >
           <BarChart3 className="h-3.5 w-3.5" />
           Results
@@ -219,6 +276,7 @@ export default function PollPage() {
             Cast Your Vote
           </h2>
 
+          {/* Success banner */}
           {hasVoted && (
             <motion.div
               initial={{ opacity: 0, y: -8 }}
@@ -227,7 +285,35 @@ export default function PollPage() {
             >
               <CheckCircle2 className="h-4 w-4 text-emerald-400" />
               <span className="text-xs text-emerald-400 font-medium">
-                Your vote has been recorded!
+                Vote submitted! Results update automatically.
+              </span>
+            </motion.div>
+          )}
+
+          {/* Error banner */}
+          {voteError && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20"
+            >
+              <AlertCircle className="h-4 w-4 text-red-400" />
+              <span className="text-xs text-red-400 font-medium">
+                {(voteErrorData as Error)?.message ?? "Failed to submit vote. Please try again."}
+              </span>
+            </motion.div>
+          )}
+
+          {/* Closed banner */}
+          {isClosed && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20"
+            >
+              <Clock className="h-4 w-4 text-red-400" />
+              <span className="text-xs text-red-400 font-medium">
+                This poll is closed. Voting is no longer available.
               </span>
             </motion.div>
           )}
@@ -247,25 +333,22 @@ export default function PollPage() {
                       onClick={() => {
                         if (!isClosed && !hasVoted) setSelectedOption(option.id);
                       }}
-                      disabled={isClosed || hasVoted}
-                      className={`w-full text-left px-4 py-3.5 rounded-xl border transition-all duration-200 ${
-                        isSelected
+                      disabled={isClosed || hasVoted || isVoting}
+                      className={`w-full text-left px-4 py-3.5 rounded-xl border transition-all duration-200 ${isSelected
                           ? "border-purple-500/60 bg-purple-500/10 shadow-lg shadow-purple-500/5"
                           : "border-zinc-800/50 bg-zinc-800/20 hover:border-zinc-700/60 hover:bg-zinc-800/40"
-                      } ${
-                        isClosed || hasVoted
+                        } ${isClosed || hasVoted || isVoting
                           ? "opacity-60 cursor-not-allowed"
                           : "cursor-pointer"
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center gap-3">
                         {/* Radio indicator */}
                         <div
-                          className={`h-5 w-5 rounded-full border-2 flex items-center justify-center transition-all shrink-0 ${
-                            isSelected
+                          className={`h-5 w-5 rounded-full border-2 flex items-center justify-center transition-all shrink-0 ${isSelected
                               ? "border-purple-500 bg-purple-500"
                               : "border-zinc-600"
-                          }`}
+                            }`}
                         >
                           {isSelected && (
                             <motion.div
@@ -277,9 +360,8 @@ export default function PollPage() {
                         </div>
 
                         <span
-                          className={`text-sm font-medium ${
-                            isSelected ? "text-purple-200" : "text-zinc-300"
-                          }`}
+                          className={`text-sm font-medium ${isSelected ? "text-purple-200" : "text-zinc-300"
+                            }`}
                         >
                           {option.option}
                         </span>
@@ -297,15 +379,23 @@ export default function PollPage() {
               animate={{ opacity: 1 }}
               transition={{ delay: 0.3 }}
               onClick={handleVote}
-              disabled={selectedOption === null}
-              className={`mt-6 w-full flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition-all ${
-                selectedOption !== null
+              disabled={selectedOption === null || isVoting}
+              className={`mt-6 w-full flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition-all ${selectedOption !== null && !isVoting
                   ? "bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white shadow-lg shadow-purple-500/20 hover:shadow-purple-500/30"
                   : "bg-zinc-800 text-zinc-600 cursor-not-allowed"
-              }`}
+                }`}
             >
-              <Vote className="h-4 w-4" />
-              Submit Vote
+              {isVoting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Submitting…
+                </>
+              ) : (
+                <>
+                  <Vote className="h-4 w-4" />
+                  Submit Vote
+                </>
+              )}
             </motion.button>
           )}
         </div>
@@ -317,73 +407,74 @@ export default function PollPage() {
             Live Results
           </h2>
           <p className="text-xs text-zinc-600 mb-5">
-            {totalVotes} total votes
+            {totalVotes} total vote{totalVotes !== 1 ? "s" : ""}
           </p>
 
           <div className="space-y-4">
-            {mockResults
-              .sort((a, b) => b.votes - a.votes)
-              .map((result, i) => {
-                const pct =
-                  totalVotes > 0
-                    ? Math.round((result.votes / totalVotes) * 100)
-                    : 0;
-                return (
-                  <motion.div
-                    key={result.id}
-                    initial={{ opacity: 0, x: 12 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: i * 0.08 }}
-                  >
-                    <div className="flex items-center justify-between mb-1.5">
-                      <div className="flex items-center gap-2">
-                        <div
-                          className={`h-2.5 w-2.5 rounded-full ${
-                            BG_COLORS[i % BG_COLORS.length]
+            {sortedResults.map((result, i) => {
+              const pct =
+                totalVotes > 0
+                  ? Math.round((result.votes / totalVotes) * 100)
+                  : 0;
+              return (
+                <motion.div
+                  key={result.id}
+                  initial={{ opacity: 0, x: 12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.08 }}
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={`h-2.5 w-2.5 rounded-full ${BG_COLORS[i % BG_COLORS.length]
                           }`}
-                        />
-                        <span className="text-sm text-zinc-300 font-medium">
-                          {result.option}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-zinc-500">
-                          {result.votes} votes
-                        </span>
-                        <span className="text-sm font-bold text-white">
-                          {pct}%
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Progress bar */}
-                    <div className="h-3 rounded-full bg-zinc-800/60 overflow-hidden">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${pct}%` }}
-                        transition={{
-                          duration: 1,
-                          delay: i * 0.1,
-                          ease: "easeOut",
-                        }}
-                        className={`h-full rounded-full bg-gradient-to-r ${
-                          COLORS[i % COLORS.length]
-                        }`}
                       />
+                      <span className="text-sm text-zinc-300 font-medium">
+                        {result.option}
+                      </span>
                     </div>
-                  </motion.div>
-                );
-              })}
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-zinc-500">
+                        {result.votes} vote{result.votes !== 1 ? "s" : ""}
+                      </span>
+                      <span className="text-sm font-bold text-white">
+                        {pct}%
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Progress bar */}
+                  <div className="h-3 rounded-full bg-zinc-800/60 overflow-hidden">
+                    <motion.div
+                      initial={{ width: 0 }}
+                      animate={{ width: `${pct}%` }}
+                      transition={{
+                        duration: 0.8,
+                        delay: i * 0.1,
+                        ease: "easeOut",
+                      }}
+                      className={`h-full rounded-full bg-gradient-to-r ${COLORS[i % COLORS.length]
+                        }`}
+                    />
+                  </div>
+                </motion.div>
+              );
+            })}
+
+            {totalVotes === 0 && (
+              <p className="text-xs text-zinc-600 text-center py-6">
+                No votes yet — be the first!
+              </p>
+            )}
           </div>
 
           {/* Legend */}
           <div className="mt-6 pt-4 border-t border-zinc-800/50 flex flex-wrap gap-3">
-            {mockResults.map((result, i) => (
+            {sortedResults.map((result, i) => (
               <div key={result.id} className="flex items-center gap-1.5">
                 <div
-                  className={`h-2 w-2 rounded-full ${
-                    BG_COLORS[i % BG_COLORS.length]
-                  }`}
+                  className={`h-2 w-2 rounded-full ${BG_COLORS[i % BG_COLORS.length]
+                    }`}
                 />
                 <span className="text-[11px] text-zinc-500">
                   {result.option}
