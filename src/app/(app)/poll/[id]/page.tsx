@@ -21,6 +21,8 @@ import { usePollDetail } from "@/hooks/usePollDetail";
 import type { PollTotals } from "@/hooks/usePollDetail";
 import { useVote } from "@/hooks/useVote";
 import { useMyVote } from "@/hooks/useMyVote";
+import { useChangeVote } from "@/hooks/useChangeVote";
+import { useWithdrawVote } from "@/hooks/useWithdrawVote";
 
 export default function PollPage() {
   const params = useParams();
@@ -45,11 +47,14 @@ export default function PollPage() {
   const { data: myVote } = useMyVote(pollId);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [hasVoted, setHasVoted] = useState(false);
+  // votedOptionId tracks which option the user last confirmed (for detecting a change)
+  const [votedOptionId, setVotedOptionId] = useState<number | null>(null);
   // Sync prior vote state once the myVote query resolves
   useEffect(() => {
     if (myVote?.voted && myVote.optionId !== null) {
       setHasVoted(true);
       setSelectedOption(myVote.optionId);
+      setVotedOptionId(myVote.optionId);
     }
   }, [myVote]);
 
@@ -78,13 +83,19 @@ export default function PollPage() {
     onPollClosed: handlePollClosed,
   });
 
-  // Vote mutation
+  // Vote mutation (first-time)
   const {
     mutate: submitVote,
     isPending: isVoting,
     isError: voteError,
     error: voteErrorData,
   } = useVote();
+
+  // Change vote mutation
+  const { mutate: submitChange, isPending: isChanging } = useChangeVote();
+
+  // Withdraw vote mutation
+  const { mutate: submitWithdraw, isPending: isWithdrawing } = useWithdrawVote();
 
   const isClosed =
     closedOverride ||
@@ -151,10 +162,34 @@ export default function PollPage() {
       {
         onSuccess: () => {
           setHasVoted(true);
+          setVotedOptionId(selectedOption);
           setActiveTab("results");
         },
       }
     );
+  };
+
+  const handleChangeVote = () => {
+    if (selectedOption === null || !pollId) return;
+    submitChange(
+      { pollId, optionId: selectedOption },
+      {
+        onSuccess: () => {
+          setVotedOptionId(selectedOption);
+        },
+      }
+    );
+  };
+
+  const handleWithdrawVote = () => {
+    if (!pollId) return;
+    submitWithdraw(pollId, {
+      onSuccess: () => {
+        setHasVoted(false);
+        setSelectedOption(null);
+        setVotedOptionId(null);
+      },
+    });
   };
 
   // Loading
@@ -276,8 +311,8 @@ export default function PollPage() {
             Cast Your Vote
           </h2>
 
-          {/* Success banner */}
-          {hasVoted && (
+          {/* Success banner — only when just voted or vote confirmed */}
+          {hasVoted && !isClosed && (
             <motion.div
               initial={{ opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}
@@ -285,7 +320,7 @@ export default function PollPage() {
             >
               <CheckCircle2 className="h-4 w-4 text-emerald-400" />
               <span className="text-xs text-emerald-400 font-medium">
-                Vote submitted! Results update automatically.
+                You voted! Select a different option to change, or withdraw below.
               </span>
             </motion.div>
           )}
@@ -331,13 +366,14 @@ export default function PollPage() {
                       animate={{ opacity: 1, x: 0 }}
                       transition={{ delay: i * 0.06 }}
                       onClick={() => {
-                        if (!isClosed && !hasVoted) setSelectedOption(option.id);
+                        if (!isClosed && !isVoting && !isChanging && !isWithdrawing)
+                          setSelectedOption(option.id);
                       }}
-                      disabled={isClosed || hasVoted || isVoting}
+                      disabled={isClosed || isVoting || isChanging || isWithdrawing}
                       className={`w-full text-left px-4 py-3.5 rounded-xl border transition-all duration-200 ${isSelected
                           ? "border-purple-500/60 bg-purple-500/10 shadow-lg shadow-purple-500/5"
                           : "border-zinc-800/50 bg-zinc-800/20 hover:border-zinc-700/60 hover:bg-zinc-800/40"
-                        } ${isClosed || hasVoted || isVoting
+                        } ${isClosed || isVoting || isChanging || isWithdrawing
                           ? "opacity-60 cursor-not-allowed"
                           : "cursor-pointer"
                         }`}
@@ -372,8 +408,9 @@ export default function PollPage() {
             </AnimatePresence>
           </div>
 
-          {/* Submit button */}
+          {/* Action buttons */}
           {!isClosed && !hasVoted && (
+            // First-time vote button
             <motion.button
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -386,17 +423,54 @@ export default function PollPage() {
                 }`}
             >
               {isVoting ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Submitting…
-                </>
+                <><Loader2 className="h-4 w-4 animate-spin" />Submitting…</>
               ) : (
-                <>
-                  <Vote className="h-4 w-4" />
-                  Submit Vote
-                </>
+                <><Vote className="h-4 w-4" />Submit Vote</>
               )}
             </motion.button>
+          )}
+
+          {!isClosed && hasVoted && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.3 }}
+              className="mt-6 flex flex-col gap-3"
+            >
+              {/* Change vote — only active when a DIFFERENT option is selected */}
+              <button
+                onClick={handleChangeVote}
+                disabled={selectedOption === votedOptionId || selectedOption === null || isChanging || isWithdrawing}
+                className={`w-full flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition-all ${
+                  selectedOption !== votedOptionId && selectedOption !== null && !isChanging && !isWithdrawing
+                    ? "bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white shadow-lg shadow-purple-500/20"
+                    : "bg-zinc-800 text-zinc-600 cursor-not-allowed"
+                }`}
+              >
+                {isChanging ? (
+                  <><Loader2 className="h-4 w-4 animate-spin" />Changing…</>
+                ) : (
+                  <><Vote className="h-4 w-4" />Change Vote</>
+                )}
+              </button>
+
+              {/* Withdraw vote */}
+              <button
+                onClick={handleWithdrawVote}
+                disabled={isWithdrawing || isChanging}
+                className={`w-full flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition-all border ${
+                  !isWithdrawing && !isChanging
+                    ? "border-red-500/40 text-red-400 hover:bg-red-500/10 hover:border-red-500/60"
+                    : "border-zinc-700 text-zinc-600 cursor-not-allowed"
+                }`}
+              >
+                {isWithdrawing ? (
+                  <><Loader2 className="h-4 w-4 animate-spin" />Withdrawing…</>
+                ) : (
+                  <><AlertCircle className="h-4 w-4" />Withdraw Vote</>
+                )}
+              </button>
+            </motion.div>
           )}
         </div>
 
