@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Share2,
@@ -19,6 +20,7 @@ interface PollCardProps {
 }
 
 export default function PollCard({ poll }: PollCardProps) {
+  const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -158,6 +160,9 @@ export default function PollCard({ poll }: PollCardProps) {
 
         {/* Result button */}
         <button
+          onClick={() =>
+            router.push(`/poll/${poll.id}?tab=results&viewOnly=true`)
+          }
           className={`flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-semibold transition-colors ${
             isClosed
               ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"

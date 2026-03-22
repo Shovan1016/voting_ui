@@ -31,6 +31,7 @@ export default function PollPage() {
   const pollId = params?.id ? Number(params.id) : null;
   const pollIdStr = params?.id ? String(params.id) : null;
   const initialTab = searchParams.get("tab") === "results" ? "results" : "vote";
+  const viewOnly = searchParams.get("viewOnly") === "true";
 
   const { data, isLoading, isError } = usePollDetail(pollId);
   const poll = data?.poll;
@@ -278,201 +279,205 @@ export default function PollPage() {
         </div>
       </div>
 
-      {/* Tab switcher */}
-      <div className="flex gap-1 p-1 bg-zinc-900/60 border border-zinc-800/50 rounded-xl mb-6 w-fit">
-        <button
-          onClick={() => setActiveTab("vote")}
-          className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === "vote"
-              ? "bg-purple-600 text-white shadow-lg shadow-purple-500/20"
-              : "text-zinc-400 hover:text-white"
-            }`}
-        >
-          <Vote className="h-3.5 w-3.5" />
-          Vote
-        </button>
-        <button
-          onClick={() => setActiveTab("results")}
-          className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === "results"
-              ? "bg-purple-600 text-white shadow-lg shadow-purple-500/20"
-              : "text-zinc-400 hover:text-white"
-            }`}
-        >
-          <BarChart3 className="h-3.5 w-3.5" />
-          Results
-        </button>
-      </div>
-
-      {/* Two-column layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Vote Panel */}
-        <div className="bg-zinc-900/60 border border-zinc-800/50 backdrop-blur-xl rounded-2xl p-6">
-          <h2 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider mb-4 flex items-center gap-2">
-            <Vote className="h-4 w-4 text-purple-400" />
-            Cast Your Vote
-          </h2>
-
-          {/* Success banner — only when just voted or vote confirmed */}
-          {hasVoted && !isClosed && (
-            <motion.div
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20"
-            >
-              <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-              <span className="text-xs text-emerald-400 font-medium">
-                You voted! Select a different option to change, or withdraw below.
-              </span>
-            </motion.div>
-          )}
-
-          {/* Error banner */}
-          {voteError && (
-            <motion.div
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20"
-            >
-              <AlertCircle className="h-4 w-4 text-red-400" />
-              <span className="text-xs text-red-400 font-medium">
-                {(voteErrorData as Error)?.message ?? "Failed to submit vote. Please try again."}
-              </span>
-            </motion.div>
-          )}
-
-          {/* Closed banner */}
-          {isClosed && (
-            <motion.div
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20"
-            >
-              <Clock className="h-4 w-4 text-red-400" />
-              <span className="text-xs text-red-400 font-medium">
-                This poll is closed. Voting is no longer available.
-              </span>
-            </motion.div>
-          )}
-
-          <div className="space-y-3">
-            <AnimatePresence mode="wait">
-              {poll.options
-                .sort((a, b) => a.displayOrder - b.displayOrder)
-                .map((option, i) => {
-                  const isSelected = selectedOption === option.id;
-                  return (
-                    <motion.button
-                      key={option.id}
-                      initial={{ opacity: 0, x: -12 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: i * 0.06 }}
-                      onClick={() => {
-                        if (!isClosed && !isVoting && !isChanging && !isWithdrawing)
-                          setSelectedOption(option.id);
-                      }}
-                      disabled={isClosed || isVoting || isChanging || isWithdrawing}
-                      className={`w-full text-left px-4 py-3.5 rounded-xl border transition-all duration-200 ${isSelected
-                          ? "border-purple-500/60 bg-purple-500/10 shadow-lg shadow-purple-500/5"
-                          : "border-zinc-800/50 bg-zinc-800/20 hover:border-zinc-700/60 hover:bg-zinc-800/40"
-                        } ${isClosed || isVoting || isChanging || isWithdrawing
-                          ? "opacity-60 cursor-not-allowed"
-                          : "cursor-pointer"
-                        }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        {/* Radio indicator */}
-                        <div
-                          className={`h-5 w-5 rounded-full border-2 flex items-center justify-center transition-all shrink-0 ${isSelected
-                              ? "border-purple-500 bg-purple-500"
-                              : "border-zinc-600"
-                            }`}
-                        >
-                          {isSelected && (
-                            <motion.div
-                              initial={{ scale: 0 }}
-                              animate={{ scale: 1 }}
-                              className="h-2 w-2 rounded-full bg-white"
-                            />
-                          )}
-                        </div>
-
-                        <span
-                          className={`text-sm font-medium ${isSelected ? "text-purple-200" : "text-zinc-300"
-                            }`}
-                        >
-                          {option.option}
-                        </span>
-                      </div>
-                    </motion.button>
-                  );
-                })}
-            </AnimatePresence>
-          </div>
-
-          {/* Action buttons */}
-          {!isClosed && !hasVoted && (
-            // First-time vote button
-            <motion.button
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.3 }}
-              onClick={handleVote}
-              disabled={selectedOption === null || isVoting}
-              className={`mt-6 w-full flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition-all ${selectedOption !== null && !isVoting
-                  ? "bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white shadow-lg shadow-purple-500/20 hover:shadow-purple-500/30"
-                  : "bg-zinc-800 text-zinc-600 cursor-not-allowed"
-                }`}
-            >
-              {isVoting ? (
-                <><Loader2 className="h-4 w-4 animate-spin" />Submitting…</>
-              ) : (
-                <><Vote className="h-4 w-4" />Submit Vote</>
-              )}
-            </motion.button>
-          )}
-
-          {!isClosed && hasVoted && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.3 }}
-              className="mt-6 flex flex-col gap-3"
-            >
-              {/* Change vote — only active when a DIFFERENT option is selected */}
-              <button
-                onClick={handleChangeVote}
-                disabled={selectedOption === votedOptionId || selectedOption === null || isChanging || isWithdrawing}
-                className={`w-full flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition-all ${
-                  selectedOption !== votedOptionId && selectedOption !== null && !isChanging && !isWithdrawing
-                    ? "bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white shadow-lg shadow-purple-500/20"
-                    : "bg-zinc-800 text-zinc-600 cursor-not-allowed"
-                }`}
-              >
-                {isChanging ? (
-                  <><Loader2 className="h-4 w-4 animate-spin" />Changing…</>
-                ) : (
-                  <><Vote className="h-4 w-4" />Change Vote</>
-                )}
-              </button>
-
-              {/* Withdraw vote */}
-              <button
-                onClick={handleWithdrawVote}
-                disabled={isWithdrawing || isChanging}
-                className={`w-full flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition-all border ${
-                  !isWithdrawing && !isChanging
-                    ? "border-red-500/40 text-red-400 hover:bg-red-500/10 hover:border-red-500/60"
-                    : "border-zinc-700 text-zinc-600 cursor-not-allowed"
-                }`}
-              >
-                {isWithdrawing ? (
-                  <><Loader2 className="h-4 w-4 animate-spin" />Withdrawing…</>
-                ) : (
-                  <><AlertCircle className="h-4 w-4" />Withdraw Vote</>
-                )}
-              </button>
-            </motion.div>
-          )}
+      {/* Tab switcher — hidden in viewOnly mode */}
+      {!viewOnly && (
+        <div className="flex gap-1 p-1 bg-zinc-900/60 border border-zinc-800/50 rounded-xl mb-6 w-fit">
+          <button
+            onClick={() => setActiveTab("vote")}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === "vote"
+                ? "bg-purple-600 text-white shadow-lg shadow-purple-500/20"
+                : "text-zinc-400 hover:text-white"
+              }`}
+          >
+            <Vote className="h-3.5 w-3.5" />
+            Vote
+          </button>
+          <button
+            onClick={() => setActiveTab("results")}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === "results"
+                ? "bg-purple-600 text-white shadow-lg shadow-purple-500/20"
+                : "text-zinc-400 hover:text-white"
+              }`}
+          >
+            <BarChart3 className="h-3.5 w-3.5" />
+            Results
+          </button>
         </div>
+      )}
+
+      {/* Two-column layout — vote panel hidden in viewOnly mode */}
+      <div className={`grid gap-6 ${viewOnly ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-2"}`}>
+        {/* Vote Panel — hidden in viewOnly mode */}
+        {!viewOnly && (
+          <div className="bg-zinc-900/60 border border-zinc-800/50 backdrop-blur-xl rounded-2xl p-6">
+            <h2 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider mb-4 flex items-center gap-2">
+              <Vote className="h-4 w-4 text-purple-400" />
+              Cast Your Vote
+            </h2>
+
+            {/* Success banner — only when just voted or vote confirmed */}
+            {hasVoted && !isClosed && (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20"
+              >
+                <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                <span className="text-xs text-emerald-400 font-medium">
+                  You voted! Select a different option to change, or withdraw below.
+                </span>
+              </motion.div>
+            )}
+
+            {/* Error banner */}
+            {voteError && (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20"
+              >
+                <AlertCircle className="h-4 w-4 text-red-400" />
+                <span className="text-xs text-red-400 font-medium">
+                  {(voteErrorData as Error)?.message ?? "Failed to submit vote. Please try again."}
+                </span>
+              </motion.div>
+            )}
+
+            {/* Closed banner */}
+            {isClosed && (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20"
+              >
+                <Clock className="h-4 w-4 text-red-400" />
+                <span className="text-xs text-red-400 font-medium">
+                  This poll is closed. Voting is no longer available.
+                </span>
+              </motion.div>
+            )}
+
+            <div className="space-y-3">
+              <AnimatePresence mode="wait">
+                {poll.options
+                  .sort((a, b) => a.displayOrder - b.displayOrder)
+                  .map((option, i) => {
+                    const isSelected = selectedOption === option.id;
+                    return (
+                      <motion.button
+                        key={option.id}
+                        initial={{ opacity: 0, x: -12 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: i * 0.06 }}
+                        onClick={() => {
+                          if (!isClosed && !isVoting && !isChanging && !isWithdrawing)
+                            setSelectedOption(option.id);
+                        }}
+                        disabled={isClosed || isVoting || isChanging || isWithdrawing}
+                        className={`w-full text-left px-4 py-3.5 rounded-xl border transition-all duration-200 ${isSelected
+                            ? "border-purple-500/60 bg-purple-500/10 shadow-lg shadow-purple-500/5"
+                            : "border-zinc-800/50 bg-zinc-800/20 hover:border-zinc-700/60 hover:bg-zinc-800/40"
+                          } ${isClosed || isVoting || isChanging || isWithdrawing
+                            ? "opacity-60 cursor-not-allowed"
+                            : "cursor-pointer"
+                          }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          {/* Radio indicator */}
+                          <div
+                            className={`h-5 w-5 rounded-full border-2 flex items-center justify-center transition-all shrink-0 ${isSelected
+                                ? "border-purple-500 bg-purple-500"
+                                : "border-zinc-600"
+                              }`}
+                          >
+                            {isSelected && (
+                              <motion.div
+                                initial={{ scale: 0 }}
+                                animate={{ scale: 1 }}
+                                className="h-2 w-2 rounded-full bg-white"
+                              />
+                            )}
+                          </div>
+
+                          <span
+                            className={`text-sm font-medium ${isSelected ? "text-purple-200" : "text-zinc-300"
+                              }`}
+                          >
+                            {option.option}
+                          </span>
+                        </div>
+                      </motion.button>
+                    );
+                  })}
+              </AnimatePresence>
+            </div>
+
+            {/* Action buttons */}
+            {!isClosed && !hasVoted && (
+              // First-time vote button
+              <motion.button
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.3 }}
+                onClick={handleVote}
+                disabled={selectedOption === null || isVoting}
+                className={`mt-6 w-full flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition-all ${selectedOption !== null && !isVoting
+                    ? "bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white shadow-lg shadow-purple-500/20 hover:shadow-purple-500/30"
+                    : "bg-zinc-800 text-zinc-600 cursor-not-allowed"
+                  }`}
+              >
+                {isVoting ? (
+                  <><Loader2 className="h-4 w-4 animate-spin" />Submitting…</>
+                ) : (
+                  <><Vote className="h-4 w-4" />Submit Vote</>
+                )}
+              </motion.button>
+            )}
+
+            {!isClosed && hasVoted && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.3 }}
+                className="mt-6 flex flex-col gap-3"
+              >
+                {/* Change vote — only active when a DIFFERENT option is selected */}
+                <button
+                  onClick={handleChangeVote}
+                  disabled={selectedOption === votedOptionId || selectedOption === null || isChanging || isWithdrawing}
+                  className={`w-full flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition-all ${
+                    selectedOption !== votedOptionId && selectedOption !== null && !isChanging && !isWithdrawing
+                      ? "bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white shadow-lg shadow-purple-500/20"
+                      : "bg-zinc-800 text-zinc-600 cursor-not-allowed"
+                  }`}
+                >
+                  {isChanging ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" />Changing…</>
+                  ) : (
+                    <><Vote className="h-4 w-4" />Change Vote</>
+                  )}
+                </button>
+
+                {/* Withdraw vote */}
+                <button
+                  onClick={handleWithdrawVote}
+                  disabled={isWithdrawing || isChanging}
+                  className={`w-full flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition-all border ${
+                    !isWithdrawing && !isChanging
+                      ? "border-red-500/40 text-red-400 hover:bg-red-500/10 hover:border-red-500/60"
+                      : "border-zinc-700 text-zinc-600 cursor-not-allowed"
+                  }`}
+                >
+                  {isWithdrawing ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" />Withdrawing…</>
+                  ) : (
+                    <><AlertCircle className="h-4 w-4" />Withdraw Vote</>
+                  )}
+                </button>
+              </motion.div>
+            )}
+          </div>
+        )}
 
         {/* Results Panel */}
         <div className="bg-zinc-900/60 border border-zinc-800/50 backdrop-blur-xl rounded-2xl p-6">
